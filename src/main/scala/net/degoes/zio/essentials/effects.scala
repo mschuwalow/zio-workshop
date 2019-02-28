@@ -3,6 +3,10 @@
 package net.degoes.zio
 package essentials
 
+import net.degoes.zio.essentials.effects.Console._
+
+import scala.util.Try
+
 object effects {
 
   /**
@@ -17,7 +21,15 @@ object effects {
      * Implement `flatMap` for every type of `Console[A]` to turn it into a
      * `Console[B]` using the function `f`.
      */
-    final def flatMap[B](f: A => Console[B]): Console[B] = ???
+    final def flatMap[B](f: A => Console[B]): Console[B] =
+      self match {
+        case ReadLine(next) =>
+          ReadLine(input => next(input).flatMap(f))
+        case WriteLine(line, next) =>
+          WriteLine(line, next.flatMap(f))
+        case Return(thunk) =>
+          f(thunk())
+      }
 
     final def map[B](f: A => B): Console[B] = flatMap(f andThen (Console.succeed(_)))
 
@@ -28,7 +40,9 @@ object effects {
     /**
      * Implement the `zip` function using `flatMap` and `map`.
      */
-    final def zip[B](that: Console[B]): Console[(A, B)] = ???
+    final def zip[B](that: Console[B]): Console[(A, B)] =
+      self.flatMap(a => that.map(b => (a, b)))
+
   }
   object Console {
     final case class ReadLine[A](next: String => Console[A])      extends Console[A]
@@ -38,117 +52,125 @@ object effects {
     /**
      * Implement the following helper functions:
      */
-    final val readLine: Console[String]              = ???
-    final def writeLine(line: String): Console[Unit] = ???
-    final def succeed[A](a: => A): Console[A]        = ???
+
+    val readLine: Console[String] =
+      ReadLine(input => Return(() => input))
+
+    def writeLine(line: String): Console[Unit] =
+      WriteLine(line, Return(() => ()))
+
+    def succeed[A](a: => A): Console[A]        =
+      Return(() => a)
   }
 
   /**
    * Using the helper functions, write a program that just returns a unit value.
    */
-  val unit: Console[???] = ???
+  val unit: Console[Unit] =
+    succeed(Unit)
 
   /**
    * Using the helper functions, write a program that just returns the value 42.
    */
-  val fortyTwo: Console[???] = ???
+  val value: Console[Int] =
+    succeed(43)
 
   /**
    * Using the helper functions, write a program that asks the user for their name.
    */
-  val askName: Console[Unit] = ???
+  val askYourName: Console[Unit] =
+    writeLine("What is your name?")
 
   /**
    * Using the helper functions, write a program that read the name of the user.
    */
-  val readName: Console[String] = ???
-
-  /**
-   * Using the helper functions, write a program that greets the user by their name.
-   */
-  def greetUser(name: String): Console[Unit] =
-    ???
+  val name: Console[String] =
+    readLine
 
   /***
-   * Using `flatMap` and the preceding three functions, write a program that
-   * asks the user for their name, reads their name, and greets them.
-   */
+    * Using `flatMap` and the preceding three functions, write a program that
+    * asks the user for their name, reads their name, and greets them.
+    */
   val sayHello: Console[Unit] =
-    ???
+    for {
+      _     <- askYourName
+      name  <- name
+      _     <- writeLine(s"Hello $name!")
+    } yield ()
 
   /**
    * Write a program that reads from the console then parse the given input into int if it possible
    * otherwise it returns None
    */
-  val readInt: Console[???] = ???
+  val readInt: Console[Option[Int]] =
+    Console.readLine.map(str => Try(str.toInt).toOption)
 
   /**
    * implement the following effectful procedure, which interprets
    * the description of a given `Console[A]` into A and run it.
    */
   def unsafeRun[A](program: Console[A]): A =
-    ???
+    program match {
+      case Return(thunk) =>
+        thunk()
+      case WriteLine(line, next) =>
+        println(line)
+        unsafeRun(next)
+      case ReadLine(next) =>
+        val line = scala.io.StdIn.readLine()
+        unsafeRun(next(line))
+    }
 
   /**
    * implement the following combinator `collectAll` that operates on programs
    */
   def collectAll[A](programs: List[Console[A]]): Console[List[A]] =
-    ???
+    programs.foldRight[Console[List[A]]](succeed(Nil)) {
+      case (pA, pList) =>
+        pA.zip(pList).map {
+          case (head, tail) => head :: tail
+        }
+    }
+
+  val questions = List("What is your name?",
+    "Where were you born?", "Where do you live?",
+    "What is your age?", "What is your favorite programming language?")
+
+  val answerProgram: Console[List[String]] =
+    collectAll(questions.map(Console.writeLine(_) *> Console.readLine))
+
+  val answerPrograms2: Console[List[String]] = foreach(questions) { question =>
+    Console.writeLine(question) *> Console.readLine
+  }
 
   /**
    * implement the `foreach` function that compute a result for each iteration
    */
   def foreach[A, B](values: List[A])(body: A => Console[B]): Console[List[B]] =
-    ???
-
-  /**
-   * Using `Console.writeLine` and `Console.readLine`, map the following
-   * list of strings into a list of programs, each of which writes a
-   * question and reads an answer.
-   */
-  val questions =
-    List(
-      "What is your name?",
-      "Where where you born?",
-      "Where do you live?",
-      "What is your age?",
-      "What is your favorite programming language?"
-    )
-  val answers: List[Console[String]] = ???
-
-  /**
-   * Using `collectAll`, transform `answers` into a program that returns
-   * a list of strings.
-   */
-  val answers2: Console[List[String]] = ???
-
-  /**
-   * Now using only `questions` and `foreach`, write a program that is
-   * equivalent to `answers2`.
-   */
-  val answers3: Console[List[String]] = foreach(???) { question =>
-    ???
-  }
+    collectAll(values.map(body))
 
   /**
    * Implement the methods of Thunk
    */
-  class Thunk[A](val unsafeRun: () => A) {
-    def map[B](ab: A => B): Thunk[B]             = ???
-    def flatMap[B](afb: A => Thunk[B]): Thunk[B] = ???
-    def attempt: Thunk[Either[Throwable, A]]     = ???
+  class Thunk[A](val run: () => A) {
+    def map[B](ab: A => B): Thunk[B]             =
+      Thunk(() => ab(run()))
+    def flatMap[B](afb: A => Thunk[B]): Thunk[B] =
+      Thunk(() => afb(run()).run())
+    def attempt: Thunk[Either[Throwable, A]]     =
+      Thunk(() => Try(run()).toEither)
   }
   object Thunk {
-    def succeed[A](a: => A): Thunk[A]   = ???
-    def fail[A](t: Throwable): Thunk[A] = ???
+    def succeed[A](a: => A): Thunk[A]   = Thunk(() => a)
+    def fail[A](t: Throwable): Thunk[A] = Thunk(() => throw t)
   }
 
   /**
    * Build the version of printLn and readLn
    * then make a simple program base on that.
    */
-  def printLn(line: String): Thunk[Unit] = ???
-  def readLn: Thunk[String]              = ???
+  def printLn(line: String): Thunk[Unit] = Thunk.succeed(println(line))
+  def readLn: Thunk[String]              = Thunk.succeed(scala.io.StdIn.readLine())
 
   val thunkProgram: Thunk[Unit] = ???
 }
