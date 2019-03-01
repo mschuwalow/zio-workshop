@@ -154,15 +154,15 @@ object effects {
    */
   class Thunk[A](val run: () => A) {
     def map[B](ab: A => B): Thunk[B]             =
-      Thunk(() => ab(run()))
+      new Thunk(() => ab(run()))
     def flatMap[B](afb: A => Thunk[B]): Thunk[B] =
-      Thunk(() => afb(run()).run())
+      new Thunk(() => afb(run()).run())
     def attempt: Thunk[Either[Throwable, A]]     =
-      Thunk(() => Try(run()).toEither)
+      new Thunk(() => Try(run()).toEither)
   }
   object Thunk {
-    def succeed[A](a: => A): Thunk[A]   = Thunk(() => a)
-    def fail[A](t: Throwable): Thunk[A] = Thunk(() => throw t)
+    def succeed[A](a: => A): Thunk[A]   = new Thunk(() => a)
+    def fail[A](t: Throwable): Thunk[A] = new Thunk(() => throw t)
   }
 
   /**
@@ -172,5 +172,9 @@ object effects {
   def printLn(line: String): Thunk[Unit] = Thunk.succeed(println(line))
   def readLn: Thunk[String]              = Thunk.succeed(scala.io.StdIn.readLine())
 
-  val thunkProgram: Thunk[Unit] = ???
+  val thunkProgram: Thunk[Unit] =
+    for {
+      a   <- Thunk.succeed(1)
+      b   <- Thunk.succeed(2)
+    } yield (a, b)
 }

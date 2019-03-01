@@ -4,10 +4,12 @@ package net.degoes.zio
 package essentials
 
 import java.io.{File, IOException}
+import java.nio.file.Path
 import java.util.concurrent.{Executors, TimeUnit}
 
 import scalaz.zio.Exit.Cause
 import scalaz.zio._
+import scalaz.zio.console.Console
 import scalaz.zio.internal.{Platform, PlatformLive}
 
 import scala.io.Source
@@ -19,19 +21,19 @@ import scala.io.Source
  *  - The program may fail with an error `E`
  *  - The program may succeed with a value `A`
  */
-object io_types {
+object zio_types {
 
   /**
    * Write the following types in terms of the `ZIO` type.
    */
   /**
-   * A program that might fail with an error of type `E` or succeeds with a
+   * A program that might fail with an error of type `E` or succeed with a
    * value of type `A`.
    */
   type FailOrSuccess[E, A] = ZIO[Any, E, A]
 
   /**
-   * A program that never fails and produce a value of type `A`
+   * A program that never fails and might succeed with a value of type `A`
    */
   type Success[A] = ZIO[Any, Nothing, A]
 
@@ -46,7 +48,7 @@ object io_types {
   type Forever[E] = ZIO[Any, E, Nothing]
 
   /**
-   * A program that cannot fail or return a value.
+   * A program that cannot fail or succeed with a value.
    */
   type NeverStops = ZIO[Any, Nothing, Nothing]
 
@@ -54,18 +56,19 @@ object io_types {
    * Types aliases built into ZIO.
    */
   /**
-   * An effect that may fail with a value of type `E` or compute a value of
-   * type `A`.
+   * An effect that may fail with a value of type `E` or succeed with a value
+   * of type `A`.
    */
   type IO[E, A] = ZIO[Any, E, A]
 
   /**
-   * A task that may fail with `Throwable` or compute a value of type `A`.
+   * An effect that may fail with `Throwable` or succeed with a value of
+   * type `A`.
    */
   type Task[A] = ZIO[Any, Throwable, A]
 
   /**
-   * An effect that cannot fail but may return a value of type `A`.
+   * An effect that cannot fail but may succeed with a value of type `A`.
    */
   type UIO[A] = ZIO[Any, Nothing, A]
 
@@ -74,37 +77,37 @@ object io_types {
 object zio_values {
 
   /**
-   * Using `ZIO.succeed` method. lift the integer `42` into a ZIO value
-   * and identify the correct type.
+   * Using `ZIO.succeed` method. Construct an effect that succeeds with the
+   * integer `42`, and ascribe the correct type.
    */
   val ioInt: UIO[Int] = ZIO.succeed(42)
 
   /**
-   * Using `ZIO.succeedLazy` method. Lift the bigListString into a ZIO value
-   * and identify the correct type.
+   * Using the `ZIO.succeedLazy` method, construct an effect that succeeds with
+   * the (lazily evaluated) specified value and ascribe the correct type.
    */
-  lazy val bigList       = (1L to 100000000L).toList
-  lazy val bigListString = bigList.mkString("\n")
+  lazy val bigList               = (1L to 100000000L).toList
+  lazy val bigListString         = bigList.mkString("\n")
   val ioString: UIO[String]      = IO.succeedLazy(bigListString)
 
   /**
-   * Using `ZIO.fail` method. lift the string "Incorrect value" into a failed ZIO value
-   * and identify the correct type.
+   * Using the `ZIO.fail` method, construct an effect that fails with the string
+   * "Incorrect value", and ascribe the correct type.
    */
   val incorrectVal: IO[String, Nothing] = ZIO.fail("Incorrect value")
 
   /**
-   * Using `ZIO.effectTotal` method. wrap Scala's `println` method to import it
-   * into the world of pure functional programming.
-   * and identify the correct ZIO type.
+   * Using the `ZIO.effectTotal` method, construct an effect that wraps Scala
+   * `println` method, so you have a pure functional version of print line, and
+   * ascribe the correct type.
    */
   def putStrLn(line: String): UIO[Unit] = ZIO.effectTotal(println(line))
 
   /**
-   * Using the `ZIO.effect` method, wrap Scala's `readLine` method to make it 
+   * Using the `ZIO.effect` method, wrap Scala's `readLine` method to make it
    * purely functional with the correct ZIO error type.
-   * 
-   * Note: You will have to use the `.refineOrDie` method to refine the 
+   *
+   * Note: You will have to use the `.refineOrDie` method to refine the
    * `Throwable` type into something more specific.
    */
   val getStrLn: IO[IOException, String] =
@@ -113,10 +116,10 @@ object zio_values {
     }
 
   /**
-   * Using the `ZIO.effect` method, wrap Scala's `getLines` to make it 
+   * Using the `ZIO.effect` method, wrap Scala's `getLines` to make it
    * purely functional with the correct ZIO error type.
-   * 
-   * Note: You will have to use the `.refineOrDie` method to refine the 
+   *
+   * Note: You will have to use the `.refineOrDie` method to refine the
    * `Throwable` type into something more specific.
    */
   def readFile(file: File): IO[IOException, List[String]] =
@@ -127,8 +130,8 @@ object zio_values {
   /**
    * Using the `ZIO.effect` method, wrap Scala's `Array#update` method to make
    * it purely functional with the correct ZIO error type.
-   * 
-   * Note: You will have to use the `.refineOrDie` method to refine the 
+   *
+   * Note: You will have to use the `.refineOrDie` method to refine the
    * `Throwable` type into something more specific.
    */
   def arrayUpdate[A](a: Array[A], i: Int, f: A => A): IO[ArrayIndexOutOfBoundsException, Unit] =
@@ -137,8 +140,8 @@ object zio_values {
     }
 
   /**
-   * in order to execute the effectful programs which are described in `ZIO` values,
-   * you need to interpret them using the `Runtime` in `ZIO`
+   * In order to execute the effectful programs that are described in `ZIO`
+   * values, you need to interpret them using the `Runtime` in `ZIO`
    * and call `unsafeRun`
    *       or
    * call the main function in `zio.App`
@@ -228,7 +231,7 @@ object zio_composition {
   val toFailedStr: IO[String, Nothing] = IO.fail(42).mapError(_.toString)
 
   /**
-   * Using `map` check the precondition `p` in the result of the computation of `io`
+   * Using `flatMap` check the precondition `p` in the result of the computation of `io`
    * and improve the ZIO types in the following input parameters
    */
   def verify(io: UIO[Int])(p: Int => Boolean): IO[Unit, Int] =
@@ -246,8 +249,8 @@ object zio_composition {
 
 
   /**
-   * Using `flatMap` and `map` implement `ifThenElse` which checks the ZIO condition and
-   * returns the following results (ifTrue or ifFalse)
+   * Using `flatMap`, implement `ifThenElse`, which checks the ZIO condition and
+   * returns the result of either `ifTrue` or `ifFalse`.
    *
    * @example
    * val exampleIf: IO[String, String] =
@@ -261,11 +264,11 @@ object zio_composition {
     } yield result
 
   /**
-   * Implement `divide` using `ifThenElse`
-   * if (b > 0) it returns a / b otherwise it fails with `DivideByZero`
+   * Implement `divide` using `ifThenElse`.
+   * if (b != 0), returns `a / b` otherwise, fail with `ArithmeticException`.
    */
   def divide(a: Int, b: Int): IO[ArithmeticException, Int] =
-    ifThenElse(IO.succeed(b != 0))(IO.succeed(a / b), IO.fail(ArithmeticException))
+    ifThenElse(IO.succeed(b != 0))(IO.succeed(a / b), IO.fail(new ArithmeticException))
 
   /**
    * Using `ifThenElse` implement parseInt that
@@ -314,6 +317,7 @@ object zio_composition {
   def decrementUntilFour1(int: Int): Unit =
     if (int <= 4) ()
     else decrementUntilFour1(int - 1)
+
   def decrementUntilFour2(int: UIO[Int]): UIO[Unit] =
     ifThenElse(int.map(_ <= 4))(
       IO.unit,
@@ -331,7 +335,6 @@ object zio_composition {
     if (n <= 1) IO.succeed(1)
     else factorialIO(n - 1).map(_ * n)
 
-
   /**
    * Make `factorialIO` tail recursion
    */
@@ -348,7 +351,7 @@ object zio_composition {
     for {
       a <- a
       b <- b
-    } a + b
+    } yield a + b
 
   // fa.flatmap(a => fb.flatmap(b => fc.map(c => c))))
   def flat1(a: UIO[Int], b: UIO[Int], c: UIO[Int]): UIO[Int] =
@@ -382,10 +385,9 @@ object zio_composition {
   def toTuple(io1: UIO[Int], io2: UIO[Int]): UIO[(Int, Int)] = io1.zip(io2)
 
   /**
-   * Using `zipWith` combine two ios and swap the their values
-   * identify the correct ZIO type
+   * Using `zipWith`, add the two values computed by these effects.
    */
-  val combine: UIO[Int] = IO.succeed(2).zipWith(IO.succeed(40))(_ + _)
+  val combine: UIO[Int] = ZIO.succeed(2).zipWith(IO.succeed(40))(_ + _)
 
   /**
    * Using `ZIO.foreach`
@@ -410,7 +412,7 @@ object zio_composition {
     else if ((first + last).contains(" ")) "Your name is really weird"
     else "Your name is pretty normal"
 
-  def analyzeName2(first: IO[Nothing, String], last: IO[Nothing, String]): IO[Nothing, String] =
+  def analyzeName2(first: UIO[String], last: UIO[String]): UIO[String] =
     first.zipWith(last)(analyzeName1)
 
   /**
@@ -478,7 +480,7 @@ object zio_failure {
 
   def accessArr2[A](i: Int, a: Array[A]): IO[IndexOutOfBoundsException, A] =
     if (i < 0 || i >= a.length)
-      IO.fail(IndexOutOfBoundsException)
+      IO.fail(new IndexOutOfBoundsException)
     else IO.succeed(a(i))
 
   /**
@@ -498,13 +500,13 @@ object zio_failure {
   val recovered1: UIO[Int] = divide1(100, 0).fold(_ => -1, identity)
 
   /**
-   * Recover from a division by zero error by using `foldM`
+   * Using `foldM`, Print out either an error message or the division.
    */
   val recovered2: UIO[Unit] = divide1(100, 0).foldM(
     err => UIO.effectTotal(println(err.toString)),
     succ => UIO.effectTotal(println(s"The division is $succ"))
   )
-
+  
   /**
    * Recover from division by zero error by returning -1 using `either`
    */
@@ -530,8 +532,11 @@ object zio_failure {
    * `secondChoice` only if `firstChoice` fails.
    */
   val firstChoice: IO[ArithmeticException, Int] = divide1(100, 0)
-  val secondChoice: IO[Nothing, Int]            = IO.succeed(400)
-  val combined: IO[Nothing, Int]                = firstChoice orElse secondChoice
+  val secondChoice: UIO[Int]                    = IO.succeed(400)
+  val combined: UIO[Int]                        = firstChoice orElse secondChoice
+
+  // io.catchSome
+  // io.catchAll
 
   /**
    * Using `IO.effectTotal`. Import a synchronous effect with a strange code
@@ -539,7 +544,7 @@ object zio_failure {
   val defect1: UIO[Int] = IO.effectTotal("this is a short text".charAt(30))
 
   /**
-   * Throw an Exception in pure code using `IO.succeed`.
+   * Throw an Exception in pure code using `IO.succeedLazy`.
    */
   val defect2: UIO[Int] = IO.succeed(throw new Exception("oh no!"))
 
@@ -575,8 +580,8 @@ object zio_failure {
   /**
    * using `sandboxWith` improve the code above and use `catchSome` with a partial match for the possible errors
    */
-  def caught2: IO[DomainError, Int] = veryBadIO.sandboxWith(_.catchSome {
-    case Cause.Die(e) => IO.succeed(0)
+  def caught2: IO[DomainError, Int] = veryBadIO.sandboxWith[Any, DomainError, Int](_.catchSome {
+    case Cause.Die(_: ArithmeticException) => IO.succeed(0)
   })
 
   // io.catchSome
@@ -645,7 +650,7 @@ object zio_effects {
           def run(): Unit = k(IO.unit)
         }, l, u)
     }
-
+  
   /**
    * Wrap the following Java callback API, into an `IO` using `IO.effectAsync`
    * and use other ZIO type alias
@@ -955,7 +960,7 @@ object zio_resources {
 
 }
 
-object zio_types {
+object zio_environment {
 
   /**
    * The Environments in ZIO
@@ -990,31 +995,44 @@ object zio_types {
 }
 
 object zio_dependency_management {
-
+  import scalaz.zio.console.Console
+  import scalaz.zio.clock.Clock
+  import scalaz.zio.system.System
   /**
    * Using `zio.console.getStrLn`. implement `getStrLn`
    * and identify the correct ZIO type.
    */
-  val getStrLn: ZIO[???, ???, ???] = ???
+  val getStrLn: ZIO[Console, IOException, String] = scalaz.zio.console.getStrLn
 
   /**
-   * Using `zio.console.getStrLn`. implement `putStrLn`
+   * Using `zio.console.putStrLn`. implement `putStrLn`
    * and identify the correct ZIO type.
    */
-  def putStrLn(line: String): ZIO[???, ???, ???] = ???
+  def putStrLn(line: String): ZIO[Console, Nothing, Unit] = scalaz.zio.console.putStr(line)
 
   /**
    * Identify the correct method and error type to import `System.nanoTime`
    * safely into the world of pure functional programming.
    */
-  val nanoTime: ZIO[???, ???, ???] = System.nanoTime() ?
+  val nanoTime: ZIO[Clock, Nothing, Long] = scalaz.zio.clock.nanoTime
 
   /**
    * Identify the correct method, error, and value type to import `System.exit`
    * safely into the world of pure functional programming.
    */
-  def sysExit(code: Int): ZIO[???, ???, ???] =
-    System.exit(code) ?
+  def env(value: String): ZIO[System, SecurityException, Option[String]] =
+    scalaz.zio.system.env(value)
+
+  //  call all 3 preceding methods in one
+  //  for comprehension
+  val program: ZIO[Console with System with Clock, SecurityException, Unit] =
+    for {
+      time <- nanoTime
+      _    <- putStrLn(s"The time is $time.")
+      home <- env("JAVA_HOME")
+      _    <- putStrLn(s"JAVA_HOME is $home.")
+    } yield ()
+
 
   /**
    * Build a new Service called `Configuration`
@@ -1025,33 +1043,47 @@ object zio_dependency_management {
    * - implement all helper functions.
    */
   //Module
-  trait Configuration {
-    val configuration: ???
+  trait Config {
+    val config: Config.Service[Any]
   }
 
-  object Configuration {
+  object Config {
     //service: definition of the methods
     trait Service[R] {
-      val port: ???
-      val host: ???
+      val port: ZIO[R, Nothing, Int]
+      val host: ZIO[R, Nothing, String]
     }
     //implementation
-    trait Live extends Configuration {
-      val configuration: ??? = ???
+    trait Live extends Config with System {
+      override val config: Config.Service[Any] = new Service[Any] {
+        override val port = UIO.succeed(42)
+        override val host = system.env("HOST").map(_.get) orElse UIO.succeed("localhost")
+      }
     }
-    object Live extends Live
+    object Live extends Live with System.Live
   }
+  //  val access: ZIO[Config, Nothing, Int] = ZIO.accessM(_.config.port)
+
   //Helpers
-  object configuration_ extends Configuration.Service[Configuration] {
+  object config_ extends Config.Service[Config] {
 
     /**
      * Access to the environment `Configuration` using `accessM`
      */
-    override val port: ??? = ???
-    override val host: ??? = ???
+    override val port = ZIO.accessM(_.config.port)
+    override val host = ZIO.accessM(_.config.host)
   }
 
-  object Main extends Runtime[Configuration] {
+  import config_._
+  val program1: ZIO[Config with Console, Nothing, Unit] = for {
+    port <- port
+    host <- host
+    _    <- putStrLn(s"Host is $host. Port is $port.")
+  } yield ()
+  // provide console
+  val program2: ZIO[Any, Nothing, Unit] = program1.provide(new Config.Live with System.Live with Console.Live)
+
+  object Main extends Runtime[Config] {
 
     /**
      * The platform of the runtime, which provides the essential capabilities
@@ -1059,10 +1091,14 @@ object zio_dependency_management {
      */
     override val Platform: Platform = PlatformLive.Default
 
+    // PlatformLive.Default.withMakeReportError
+    val configRuntime: Runtime[Config with Clock] =
+      Runtime(new Config.Live with System.Live with Clock.Live: Config with Clock, PlatformLive.Default)
+
     /**
      * Add the environment that you will need to provide following the exercises.
      */
-    override val Environment: ??? = ???
+    override val Environment: Config = ???
 
     /**
      * Define a ZIO value that describes an effect which uses Configuration with Console that display
@@ -1083,20 +1119,40 @@ object zio_dependency_management {
    */
   //Module
   trait FileSystem {
-    val filesystem: ???
+    val filesystem: FileSystem.Service[Any]
   }
 
   object FileSystem {
     //service: definition of the methods
-    trait Service[R] {}
+    trait Service[R] {
+      def listFiles(dir: Path): ZIO[R, IOException, List[Path]]
+      def touch(file: Path): ZIO[R, IOException, Unit]
+    }
     //implementation
     trait Live extends FileSystem {
-      val filesystem: ??? = ???
+      val filesystem: Service[Any] = new Service[Any] {
+
+        override def listFiles(dir: Path): ZIO[Any, IOException, List[Path]] =
+          ZIO.effect(dir.toFile.listFiles().map(_.toPath).toList).refineOrDie {
+            case io: IOException => io
+          }
+
+        override def touch(file: Path): ZIO[Any, IOException, Unit] =
+          zio_composition.ifThenElse(IO.effect(file.toFile.exists()))(
+            IO.unit,
+            IO.effect(file.toFile.createNewFile()).void
+          ).refineOrDie {
+            case io: IOException => io
+          }
+      }
     }
     object Live extends Live
   }
   //Helpers
-  object filesystem_ extends FileSystem.Service[FileSystem] {}
+  object filesystem_ extends FileSystem.Service[FileSystem] {
+    override def listFiles(dir: Path) = ZIO.accessM(_.filesystem.listFiles(dir))
+    override def touch(file: Path) = ZIO.accessM(_.filesystem.touch(file))
+  }
 
   /**
    * Build a query service
