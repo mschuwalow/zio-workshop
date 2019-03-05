@@ -9,7 +9,6 @@ import java.util.concurrent.{Executors, TimeUnit}
 
 import scalaz.zio.Exit.Cause
 import scalaz.zio._
-import scalaz.zio.console.Console
 import scalaz.zio.internal.{Platform, PlatformLive}
 
 import scala.io.Source
@@ -572,10 +571,7 @@ object zio_failure {
   /**
    * using `sandbox` recover the `veryBadIO` and catch all errors using `catchAll`
    */
-  val caught1: UIO[Int] = veryBadIO.sandbox.catchAll {
-    case Cause.Die(_) => IO.succeed(0)
-    case Cause.Fail(_) => IO.succeed(0)
-  }
+  val caught1: UIO[Int] = veryBadIO.sandbox.catchAll(_ => IO.succeed(0))
 
   /**
    * using `sandboxWith` improve the code above and use `catchSome` with a partial match for the possible errors
@@ -750,8 +746,8 @@ object impure_to_pure {
 
 object zio_interop {
 
-  import scala.concurrent.Future
   import scala.concurrent.ExecutionContext.global
+  import scala.concurrent.Future
 
   /**
    * Using `Fiber#toFuture`. Convert the following `Fiber` into a `Future`
@@ -780,7 +776,7 @@ object zio_interop {
 }
 
 object zio_resources {
-  import java.io.{ File, FileInputStream }
+  import java.io.{File, FileInputStream}
 
   //openFile("foo.txt").bracket(closeFile(_)) { file =>
   //  (for {
@@ -995,30 +991,33 @@ object zio_environment {
 }
 
 object zio_dependency_management {
-  import scalaz.zio.console.Console
+  import java.io.IOException
+
   import scalaz.zio.clock.Clock
+  import scalaz.zio.console.Console
   import scalaz.zio.system.System
+
   /**
-   * Using `zio.console.getStrLn`. implement `getStrLn`
-   * and identify the correct ZIO type.
+   * Using `zio.console.getStrLn`, implement `getStrLn` and identify the
+   * correct type for the ZIO effect.
    */
   val getStrLn: ZIO[Console, IOException, String] = scalaz.zio.console.getStrLn
 
   /**
-   * Using `zio.console.putStrLn`. implement `putStrLn`
-   * and identify the correct ZIO type.
+   * Using `zio.console.putStrLn`, implement `putStrLn` and identify the
+   * correct type for the ZIO effect.
    */
   def putStrLn(line: String): ZIO[Console, Nothing, Unit] = scalaz.zio.console.putStr(line)
 
   /**
-   * Identify the correct method and error type to import `System.nanoTime`
-   * safely into the world of pure functional programming.
+   * Using `scalaz.zio.clock.nanoTime`, implement `nanoTime` and identity the
+   * correct type for the ZIO effect.
    */
   val nanoTime: ZIO[Clock, Nothing, Long] = scalaz.zio.clock.nanoTime
 
   /**
-   * Identify the correct method, error, and value type to import `System.exit`
-   * safely into the world of pure functional programming.
+   * Using `scalaz.zio.system`, implement `env` and identify the correct
+   * type for the ZIO effect.
    */
   def env(value: String): ZIO[System, SecurityException, Option[String]] =
     scalaz.zio.system.env(value)
@@ -1032,7 +1031,6 @@ object zio_dependency_management {
       home <- env("JAVA_HOME")
       _    <- putStrLn(s"JAVA_HOME is $home.")
     } yield ()
-
 
   /**
    * Build a new Service called `Configuration`
@@ -1048,7 +1046,7 @@ object zio_dependency_management {
   }
 
   object Config {
-    //service: definition of the methods
+    // Service: definition of the methods provided by module:
     trait Service[R] {
       val port: ZIO[R, Nothing, Int]
       val host: ZIO[R, Nothing, String]
@@ -1060,6 +1058,7 @@ object zio_dependency_management {
         override val host = system.env("HOST").map(_.get) orElse UIO.succeed("localhost")
       }
     }
+
     object Live extends Live with System.Live
   }
   //  val access: ZIO[Config, Nothing, Int] = ZIO.accessM(_.config.port)
@@ -1068,7 +1067,7 @@ object zio_dependency_management {
   object config_ extends Config.Service[Config] {
 
     /**
-     * Access to the environment `Configuration` using `accessM`
+     * Access to the environment `Config` using `accessM`
      */
     override val port = ZIO.accessM(_.config.port)
     override val host = ZIO.accessM(_.config.host)
@@ -1086,32 +1085,36 @@ object zio_dependency_management {
   object Main extends Runtime[Config] {
 
     /**
-     * The platform of the runtime, which provides the essential capabilities
-     * necessary to bootstrap execution of tasks.
-     */
-    override val Platform: Platform = PlatformLive.Default
+      * Give the `configProgram` its dependencies by supplying it with both `Config`
+      * and `Console` modules, and determine the type of the resulting effect.
+      */
+    val configProgram: ZIO[Config with Console, ???, ???] = ???
 
     // PlatformLive.Default.withMakeReportError
     val configRuntime: Runtime[Config with Clock] =
       Runtime(new Config.Live with System.Live with Clock.Live: Config with Clock, PlatformLive.Default)
 
     /**
-     * Add the environment that you will need to provide following the exercises.
-     */
+      * Add the environment that you will need to provide following the exercises.
+      */
     override val Environment: Config = ???
 
-    /**
-     * Define a ZIO value that describes an effect which uses Configuration with Console that display
-     * the port and host in the Console and fails with a String if the host name contains `:`
-     */
-    val program: ZIO[???, String, Unit] = ???
+    override val Platform: Platform = ???
 
     /**
-     * run the `program` using `unsafeRun`
-     * @note When you call unsafeRun the Runtime will provide all the environment that you defined above
-     *       when you give a wrong Environment, you will get compile errors.
-     */
-    val run: ??? = program ?
+      * Define a ZIO value that describes an effect which uses Config with
+      * Console that displays the port and host in the Console and fails
+      * with a String if the host name contains `:`
+      */
+    val simpleConfigProgram: ZIO[Config, String, Unit] = ???
+
+    /**
+      * run the `program` using `unsafeRun`
+      *
+      * @note When you call unsafeRun the Runtime will provide all the environment that you defined above
+      *       when you give a wrong Environment, you will get compile errors.
+      */
+    val run: ??? = simpleConfigProgram ?
   }
 
   /**
@@ -1128,7 +1131,8 @@ object zio_dependency_management {
       def listFiles(dir: Path): ZIO[R, IOException, List[Path]]
       def touch(file: Path): ZIO[R, IOException, Unit]
     }
-    //implementation
+
+    // Production implementation of the module:
     trait Live extends FileSystem {
       val filesystem: Service[Any] = new Service[Any] {
 
@@ -1155,11 +1159,33 @@ object zio_dependency_management {
   }
 
   /**
-   * Build a query service
+   * Write an effect that uses `FileSystem with Console`.
    */
+  val fileProgram: ZIO[FileSystem with Console, ???, ???] = ???
 
   /**
- * Build a Mock file system
- * and test your code
- */
+   * Create a `Runtime` that can execute effects that require
+   * `FileSystem with Console`.
+   */
+  val FSRuntime: Runtime[FileSystem with Console] = ???
+
+  /**
+   * Execute `fileProgram` using `FSRuntime`.
+   */
+  lazy val fileProgramLive: ??? = FSRuntime.unsafeRun(fileProgram)
+
+  /**
+   * Implement a mock file system module.
+   */
+  trait MockFileSystem extends FileSystem {
+    val filesystem = ???
+  }
+
+  /**
+   * Using `ZIO#provide` with the mock file system module, and a default
+   * runtime, execute `fileProgram`.
+   */
+  lazy val fileProgramTest: ??? = new DefaultRuntime {}.unsafeRun {
+    fileProgram.provide(???)
+  }
 }
