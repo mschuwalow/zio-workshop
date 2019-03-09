@@ -121,6 +121,22 @@ object effects {
         unsafeRun(next(line))
     }
 
+  def f1(x: Int)      : Option[Boolean] = ???
+  def f2(x: Boolean)  : Option[Int]     = ???
+  def f3(x: Int)      : String          = ???
+
+  def foo(x: Int): Option[String] =
+    for {
+      xf1    <- f1(x)
+      xf2    <- f2(xf1) match {
+        case Some(0) =>
+          None
+        case nonZero =>
+          nonZero
+      }
+      xf3     = f3(xf2)
+    } yield xf3
+
   /**
    * implement the following combinator `collectAll` that operates on programs
    */

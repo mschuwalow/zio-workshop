@@ -6,6 +6,7 @@ package concurrency
 import java.io.IOException
 import java.time.LocalDate
 
+import net.degoes.zio.concurrency.zio_stream.firstNonEmpty
 import net.degoes.zio.essentials.zio_values
 import scalaz.zio._
 import scalaz.zio.clock.Clock
@@ -14,7 +15,6 @@ import scalaz.zio.duration._
 import scalaz.zio.random.Random
 import scalaz.zio.stream.Sink
 
-import scala.concurrent.duration.Duration
 
 object zio_fibers {
 
@@ -118,14 +118,17 @@ object zio_fibers {
       _     <- f1.zip(f2).join
     } yield ()
 
-  val sayHelloBoth: ZIO[???, ???, Unit] = sayHello ?
-
   /**
    * Write a program that computes the sum of a given List of Int and
    * checks if all elements are positive concurrently
    * At the end join the Fibers and return a tuple of their results using `zip`
    */
-  def sumPositive(as: UIO[List[Int]]): UIO[(Int, Boolean)] = ???
+  def sumPositive(as: UIO[List[Int]]): UIO[(Int, Boolean)] =
+    for {
+      sum    <- as.map(_.sum).fork
+      allPos <- as.map(_.forall(_ >= 0)).fork
+      result <- sum.zip(allPos).join
+    } yield result
 
   /**
    * Using `zipWith`. Write a program that start 2 Fibers with
@@ -133,31 +136,42 @@ object zio_fibers {
    * At the end join the Fibers and return a the result
    * Identify the correct return type.
    */
-  def sum(a: UIO[Int], b: UIO[Int]): UIO[Int] = ???
+  def sum(a: UIO[Int], b: UIO[Int]): UIO[Int] =
+    a.zipWith(b)(_ + _)
 
   /**
    * Create a FiberLocal
    */
-  val local: UIO[FiberLocal[Int]] = ???
+  val local: UIO[FiberLocal[Int]] =
+    FiberLocal.make[Int]
 
   /**
    * set a value 42 to `local` using `flatMap` and `LocalFiber#set`
    * and then call `FiberLocal#get`
    */
-  val updateLocal: UIO[Option[Int]] = ???
+  val updateLocal: UIO[Option[Int]] =
+    for {
+      _        <- local.flatMap(_.set(42))
+      result   <- local.flatMap(_.get)
+    } yield result
 
   /**
    * Using `locally`. Create FiberLocal that automatically sets
    * a value "Hello" and frees data and return that value
    */
-  val locally: UIO[Option[String]] = ???
+  val locally: UIO[Option[String]] =
+    for {
+      l  <- local
+      r  <- l.locally(42)(l.get.map(_.map(_.toString)))
+    } yield r
 
   /**
    * Write a program that executes 2 tasks in parallel
    * combining their results with the specified in a tuple. If
    * either side fails, then the other side will be interrupted.
    */
-  def par[A, B](io1: Task[A], io2: Task[B]): Task[(A, B)] = ???
+  def par[A, B](io1: Task[A], io2: Task[B]): Task[(A, B)] =
+    io1.zipPar(io2)
 }
 
 object zio_parallelism {
@@ -217,7 +231,10 @@ object zio_parallelism {
    * Rewrite `printAll` specifying the number of fibers
    * Identify the correct ZIO type.
    */
-  def printAll_(users: List[IO[String, List[User]]]): ??? = ???
+  def printAll_(users: List[IO[String, List[User]]]): ZIO[Console, Any, Unit] =
+    ZIO.foreachParN(10)(users) { user =>
+      putStrLn(user.toString)
+    }.void
 
   sealed trait Database
   object Database {
@@ -248,7 +265,14 @@ object zio_parallelism {
    */
   val a: UIO[Int]                                  = UIO.succeedLazy((1 to 1000).sum)
   val b: UIO[Int]                                  = UIO.succeedLazy((1 to 10).sum)
-  val firstCompleted1: ZIO[Console, Nothing, Unit] = ???
+  val firstCompleted1: ZIO[Console, Nothing, Int] = {
+    def handle(winner: Exit[Nothing, Int], loser: Fiber[Nothing, Int]) =
+      winner.foldM(
+      _      => loser.join,
+      succ   => loser.interrupt *> ZIO.succeed(succ)
+    )
+    a.raceWith(b)(handle, handle)
+  }
 
   /**
    * Using `raceAll` return the first completed action.
@@ -256,7 +280,7 @@ object zio_parallelism {
   val a1: ZIO[Clock, Nothing, Int]             = IO.succeed(1).delay(10.seconds)
   val a2: ZIO[Clock, Nothing, Int]             = IO.succeed(2).delay(1.second)
   val a3: ZIO[Clock, Nothing, Int]             = IO.succeed(2).delay(1.second)
-  val firstCompleted: ZIO[Clock, Nothing, Int] = (a1 :: a2 :: a3 :: Nil) ?
+  val firstCompleted: ZIO[Clock, Nothing, Int] = ZIO.interrupt.raceAll(a1 :: a2 :: a3 :: Nil)
 
 }
 
@@ -330,7 +354,10 @@ object zio_ref {
    * Using `Ref#modifySome` change the state to Closed only if the state was Active and return true
    * if the state is already closed return false
    */
-  def setClosed(ref: Ref[State], boolean: Boolean): UIO[Boolean] = ???
+  def setClosed(ref: Ref[State], boolean: Boolean): UIO[Boolean] =
+    ref.modifySome(false) {
+      case Closed => (true, Active)
+    }
 
   /**
    * RefM allows effects in atomic operations
@@ -338,15 +365,15 @@ object zio_ref {
   /**
    * Create a RefM using `RefM.apply`
    */
-  val refM: UIO[RefM[Int]] = 4 ?
+  val refM: UIO[RefM[Int]] = RefM.make(4)
 
   /**
    * update the refM with the square of the old state and print it out in the Console
    */
-  val square =
+  val square: ZIO[Any, Nothing, Int] =
     for {
-      ref <- (??? : UIO[Ref[Int]])
-      v   <- (??? : UIO[Ref[Int]])
+      ref <- refM
+      v   <- ref.update(x => ZIO.succeed(x * x))
     } yield v
 
 }
@@ -376,7 +403,7 @@ object zio_promise {
   val errored1: UIO[Boolean] =
     for {
       promise   <- makeIntPromise
-      completed <- (promise ? : UIO[Boolean])
+      completed <- (promise ? : UIO[Boolean]) // this isn't allowed to fail
     } yield completed
 
   /**
@@ -499,24 +526,32 @@ object zio_queue {
   case class Increment(amount: Int) extends Message
   val makeCounter: UIO[Message => UIO[Int]] =
     for {
-      counter <- Ref.make(0)
-      mailbox <- Queue.bounded[(Message, Promise[Nothing, Int])](100)
-      _       <- (mailbox.take ? : UIO[Fiber[Nothing, Nothing]])
-    } yield { (message: Message) =>
-      ???
-    }
+      counter  <- Ref.make(0)
+      mailbox  <- Queue.bounded[(Message, Promise[Nothing, Int])](100)
+      _        <- (for {
+                    message  <- mailbox.take
+                    _        <- message match {
+                                  case (Increment(amount), prom) => prom.done(counter.update(x => x + amount))
+                                  case (_, prom)                 => prom.done(counter.get)
+                                }
+                  } yield ()).forever.fork
+    } yield { message: Message => for {
+                                    prom   <- Promise.make[Nothing, Int]
+                                    _      <- mailbox.offer((message, prom))
+                                    result <- prom.await
+                                  } yield result }
 
   val counterExample: UIO[Int] =
     for {
       counter <- makeCounter
-      _       <- IO.collectAllPar(List.fill(100)(IO.foreach((0 to 100).map(Increment(_)))(counter)))
+      _       <- IO.collectAllPar(List.fill(100)(IO.foreach((0 to 100).map(Increment))(counter)))
       value   <- counter(Increment(0))
     } yield value
 
   /**
    * using `Queue.sliding` create a queue with capacity 3 using sliding strategy
    */
-  val slidingQ: UIO[Queue[Int]] = ???
+  val slidingQ: UIO[Queue[Int]] = Queue.sliding[Int](3)
 
   /**
    * Using `Queue#offerAll`, offer 4 integer values to a sliding queue with capacity of 3
@@ -524,24 +559,24 @@ object zio_queue {
    */
   val offer4TakeAllS: UIO[List[Int]] = for {
     queue  <- Queue.sliding[Int](3)
-    _      <- queue.offerAll(List(1, 2, 3))
-    values <- (??? : UIO[List[Int]])
-  } yield values
+    _      <- queue.offerAll(List(1, 2, 3, 4))
+    values <- queue.takeAll
+  } yield values // List(2, 3, 4)
 
   /**
-   * using `Queue.dropping` create a queue with capacity 3 using sliding strategy
+   * using `Queue.dropping` create a queue with capacity 3 using dropping strategy
    */
-  val dropingQ: UIO[Queue[Int]] = ???
+  val dropingQ: UIO[Queue[Int]] = Queue.dropping(3)
 
   /**
    * Using `Queue#offerAll`, offer 4 integer values to a dropping queue with capacity of 3
    * and take them all using `Queue#takeAll`. What will you get as result?
    */
   val offer4TakeAllD: UIO[List[Int]] = for {
-    queue  <- Queue.sliding[Int](3)
-    _      <- queue.offerAll(List(1, 2, 3))
-    values <- (??? : UIO[List[Int]])
-  } yield values
+    queue  <- Queue.dropping[Int](3)
+    _      <- queue.offerAll(List(1, 2, 3, 4))
+    values <- queue.takeAll
+  } yield values // List(1, 2, 3)
 
 }
 
@@ -550,7 +585,7 @@ object zio_semaphore {
   /**
    *Using `Semaphore.make`, create a semaphore with 1 permits.
    */
-  val semaphore: UIO[Semaphore] = ???
+  val semaphore: UIO[Semaphore] = Semaphore.make(1)
 
   /**
    * Using `Semaphore#acquire` acquire permits sequentially (using IO.???) and
@@ -559,9 +594,9 @@ object zio_semaphore {
   val nbAvailable1: UIO[Long] =
     for {
       semaphore <- Semaphore.make(5)
-      _         <- (??? : UIO[Unit])
-      available <- (??? : UIO[Long])
-    } yield available
+      _         <- semaphore.acquire
+      available <- semaphore.available
+    } yield available // 4
 
   /**
    * Using `Semaphore#acquireN` acquire permits in parallel (using IO.???) and
@@ -570,9 +605,9 @@ object zio_semaphore {
   val nbAvailable2: UIO[Long] =
     for {
       semaphore <- Semaphore.make(5)
-      _         <- (??? : UIO[Unit])
-      available <- (??? : UIO[Long])
-    } yield available
+      _         <- semaphore.acquireN(3)
+      available <- semaphore.available
+    } yield available // 2
 
   /**
    * Acquire one permit and release it using `Semaphore#release`.
@@ -581,20 +616,20 @@ object zio_semaphore {
   val nbAvailable3: UIO[Long] =
     for {
       semaphore <- Semaphore.make(5)
-      _         <- (??? : UIO[Unit])
-      _         <- (??? : UIO[Unit])
-      available <- (??? : UIO[Long])
-    } yield available
+      _         <- semaphore.acquire
+      _         <- semaphore.release
+      available <- semaphore.available
+    } yield available // 5
 
   /**
    * Using `Semaphore#withPermit` prepare a semaphore that once it acquires a permit
    * putStrL("is completed")
    */
-  val s: ZIO[Clock, Nothing, Unit] =
+  val s: ZIO[Clock with Console, Nothing, Unit] =
     for {
       semaphore <- Semaphore.make(1)
       p         <- Promise.make[Nothing, Unit]
-      _         <- (??? : UIO[Unit])
+      _         <- semaphore.withPermit(putStrLn("Completed"))
       _         <- semaphore.acquire.delay(1.second).fork
       msg       <- p.await
     } yield msg
@@ -656,7 +691,7 @@ object zio_stream {
    * Create a stream from an effect producing a String
    * using `Stream.lift`
    */
-  val stream4: Stream[Any, Nothing, String] = ???
+  val stream4: Stream[Any, Nothing, String] = Stream.lift(ZIO.succeed("test"))
 
   /**
    * Create a stream of ints that starts from 0 until 42,
@@ -691,32 +726,33 @@ object zio_stream {
   /**
    * Using `Stream#filter` filter the even numbers
    */
-  val evenNumbrers: Stream[Any, Nothing, Int] = stream1.filter(_ % 2 == 0)
+  val evenNumbers: Stream[Any, Nothing, Int] = stream1.filter(_ % 2 == 0)
 
   /**
    * Using `Stream#takeWhile` take the numbers that are less than 10
    */
-  val lessThan10: Stream[Any, Nothing, Int] = stream1 ?
+  val lessThan10: Stream[Any, Nothing, Int] = stream1.takeWhile(_ < 10)
 
   /**
    * Print out each value in the stream using `Stream#foreach`
    */
-  val printAll: Stream[Any, Nothing, Unit] = stream1 ?
+  val printAll: ZIO[Console, Nothing, Unit] = stream1.foreach(x => putStrLn(x.toString))
 
   /**
    * Convert every Int into String using `Stream#map`
    */
-  val toStr: Stream[Any, Nothing, String] = stream1 ?
+  val toStr: Stream[Any, Nothing, String] = stream1.map(_.toString)
 
   /**
    * Merge two streams together using `Stream#merge`
    */
-  val mergeBoth: Stream[Any, Nothing, Int] = (stream1, stream2) ?
+  val mergeBoth: Stream[Any, Nothing, Int] = stream1.merge(stream2)
 
   /**
    * Create a Sink using `Sink#readWhile` that takes an input of type String and check if it's not empty
    */
-  val sink: Sink[Any, Nothing, String, String, List[String]] = ???
+  val sink: Sink[Any, Nothing, String, String, List[String]] =
+    Sink.readWhile[String](_.nonEmpty)
 
   /**
    * Run `sink` on the stream to get a list of non empty string
@@ -724,6 +760,10 @@ object zio_stream {
   val stream                                         = Stream("Hello", "Hi", "Bonjour", "cześć", "", "Hallo", "Hola")
   val firstNonEmpty: ZIO[Any, Nothing, List[String]] = stream.run(Sink.collect[String])
 
+}
+
+object TestApp extends App {
+  override def run(args: List[String]): ZIO[Console, Nothing, Int] = firstNonEmpty.flatMap(x => putStrLn(x.toString())) *> ZIO.succeed(1)
 }
 
 object zio_schedule {
@@ -769,14 +809,14 @@ object zio_schedule {
    * a total of five times.
    */
   val error1   = IO.fail("Uh oh!")
-  val retried5 = error1 ?
+  val retried5 = error1.retry(Schedule.recurs(5))
 
   /**
    * Using the `Schedule#||`, the `fiveTimes` schedule,
    * and the `everySecond` schedule, create a schedule that repeats the minimum
    * of five times and every second.
    */
-  val fiveTimesOrEverySecond = ???
+  val fiveTimesOrEverySecond = Schedule.recurs(5) || Schedule.spaced(1.second)
 
   /**
    * Using `Schedule.exponential`, create an exponential schedule that starts from 10 milliseconds.
